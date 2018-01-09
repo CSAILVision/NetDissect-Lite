@@ -5,8 +5,8 @@ viewprobe creates visualizations for a certain eval.
 import re
 import numpy
 from scipy.misc import imread, imresize, imsave
-import expdir
-import bargraph
+import visualize.expdir as expdir
+import visualize.bargraph as bargraph
 import settings
 import numpy as np
 # unit,category,label,score
@@ -27,7 +27,7 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
         imsize=None, imcount=5, imscale=72, tally_result=None,
         gridwidth=None, gap=3, limit=None, force=False, threshold=0.04, verbose=False):
     ed = expdir.ExperimentDirectory(settings.OUTPUT_FOLDER)
-    print('Generating html summary', ed.filename('html/%s.html' % expdir.fn_safe(layer)))
+    print('Generating html summary %s' % ed.filename('html/%s.html' % expdir.fn_safe(layer)))
     # Grab tally stats
     # bestcat_pciou, name_pciou, score_pciou, _, _, _, _ = (tally_stats)
     if verbose:

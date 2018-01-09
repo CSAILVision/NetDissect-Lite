@@ -4,9 +4,9 @@ import os
 import re
 import random
 import signal
+import csv
 from collections import OrderedDict
 from scipy.misc import imread
-from unicsv import DictUnicodeReader
 from multiprocessing import Pool, cpu_count
 from multiprocessing.pool import ThreadPool
 from scipy.ndimage.interpolation import zoom
@@ -56,17 +56,18 @@ class SegmentationData(AbstractSegmentation):
     numbers used to describe each label class. In addition, the categories
     each have a separate c_*.csv file describing a dense coding of labels.
     '''
+
     def __init__(self, directory, categories=None, require_all=False):
         directory = os.path.expanduser(directory)
         self.directory = directory
         with open(os.path.join(directory, 'index.csv')) as f:
-            self.image = [decode_index_dict(r) for r in DictUnicodeReader(f)]
+            self.image = [decode_index_dict(r) for r in csv.DictReader(f)]
         with open(os.path.join(directory, 'category.csv')) as f:
             self.category = OrderedDict()
-            for row in DictUnicodeReader(f):
+            for row in csv.DictReader(f):
                 self.category[row['name']] = row
         with open(os.path.join(directory, 'label.csv')) as f:
-            label_data = [decode_label_dict(r) for r in DictUnicodeReader(f)]
+            label_data = [decode_label_dict(r) for r in csv.DictReader(f)]
         self.label = build_dense_label_array(label_data)
         if categories is not None:
             # Filter out unused categories
@@ -88,7 +89,7 @@ class SegmentationData(AbstractSegmentation):
         self.category_label = {}
         for cat in self.category:
             with open(os.path.join(directory, 'c_%s.csv' % cat)) as f:
-                c_data = [decode_label_dict(r) for r in DictUnicodeReader(f)]
+                c_data = [decode_label_dict(r) for r in csv.DictReader(f)]
             self.category_unmap[cat], self.category_map[cat] = (
                     build_numpy_category_map(c_data))
             self.category_label[cat] = build_dense_label_array(
