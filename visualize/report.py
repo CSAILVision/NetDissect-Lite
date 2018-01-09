@@ -27,11 +27,11 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
         imsize=None, imcount=5, imscale=72, tally_result=None,
         gridwidth=None, gap=3, limit=None, force=False, threshold=0.04, verbose=False):
     ed = expdir.ExperimentDirectory(settings.OUTPUT_FOLDER)
-    print 'Generating html summary', ed.filename('html/%s.html' % expdir.fn_safe(layer))
+    print('Generating html summary', ed.filename('html/%s.html' % expdir.fn_safe(layer)))
     # Grab tally stats
     # bestcat_pciou, name_pciou, score_pciou, _, _, _, _ = (tally_stats)
     if verbose:
-        print 'Sorting units by score.'
+        print('Sorting units by score.')
     if imsize is None:
         imsize = settings.IMG_SIZE
     top = np.argsort(maxfeature, 0)[:-1 - settings.TOPN:-1, :].transpose()
@@ -83,7 +83,7 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
                 expdir.fn_safe(layer), gridname, unit)
         if force or not ed.has('html/%s' % imfn):
             if verbose:
-                print 'Visualizing %s unit %d' % (layer, unit)
+                print('Visualizing %s unit %d' % (layer, unit))
             # Generate the top-patch image
             tiled = numpy.full(
                 ((imsize + gap) * gridheight - gap,

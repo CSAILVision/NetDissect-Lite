@@ -59,7 +59,7 @@ class SegmentationData(AbstractSegmentation):
     def __init__(self, directory, categories=None, require_all=False):
         directory = os.path.expanduser(directory)
         self.directory = directory
-        with open(os.path.join(directory, 'index_sm.csv')) as f:
+        with open(os.path.join(directory, 'index.csv')) as f:
             self.image = [decode_index_dict(r) for r in DictUnicodeReader(f)]
         with open(os.path.join(directory, 'category.csv')) as f:
             self.category = OrderedDict()

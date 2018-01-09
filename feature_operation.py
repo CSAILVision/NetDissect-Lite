@@ -80,7 +80,7 @@ class FeatureOperator:
         for batch in pd.batches():
             for concept_map in batch:
                 img_index = concept_map['i']
-                print 'labelprobe image index', img_index
+                print('labelprobe image index', img_index)
                 scalars,pixels = [],[]
                 for cat in data.category_names():
                     label_group = concept_map[cat]

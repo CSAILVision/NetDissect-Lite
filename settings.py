@@ -1,5 +1,5 @@
 # global settings
-GPU = False
+GPU = True
 MODEL = 'resnet18'
 NUM_CLASSES = 1000
 
