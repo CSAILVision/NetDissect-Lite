@@ -11,7 +11,7 @@ features, maxfeature = fo.feature_extraction(model=model, feature_names=settings
 
 for layer_id,layer in enumerate(settings.FEATURE_NAMES):
 ############ STEP 2: calculating threshold ############
-    thresholds = fo.quantile_threshold(features[layer_id])
+    thresholds = fo.quantile_threshold(maxfeature[layer_id])
 
 ############ STEP 3: calculating IoU scores ###########
     tally_result = fo.tally(features[layer_id],thresholds)

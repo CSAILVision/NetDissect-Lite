@@ -27,12 +27,12 @@ class FeatureOperator:
         imglist_results = []
         maxfeatures = [None] * len(feature_names)
         wholefeatures = [None] * len(feature_names)
-        num_batches = len(loader.indexes) / loader.batch_size
+        num_batches = (len(loader.indexes) + loader.batch_size - 1) / loader.batch_size
         for batch_idx,batch in enumerate(loader.tensor_batches(bgr_mean=self.mean)):
             del features_blobs[:]
             input = batch[0]
             batch_size = len(input)
-            print('image %d / %d' % (batch_idx, num_batches))
+            print('extracting feature from batch %d / %d' % (batch_idx+1, num_batches))
             input = torch.from_numpy(input[:, ::-1, :, :].copy())
             input.div_(255.0 * 0.224)
             if settings.GPU:
@@ -66,7 +66,12 @@ class FeatureOperator:
         return wholefeatures,maxfeatures
 
     def quantile_threshold(self, features):
-        return np.percentile(features,100*(1 - settings.QUANTILE),axis=[0,2,3])
+        print("calculating quantile threshold")
+        if len(features.shape) == 4:
+            axis=[0,2,3]
+        elif len(features.shape) == 2:
+            axis=[0]
+        return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
 
     def tally(self, features, threshold):
         data  = self.data
@@ -75,7 +80,9 @@ class FeatureOperator:
         tally_both = np.zeros((units,labels),dtype=np.uint64)
         tally_units = np.zeros(units,dtype=np.uint64)
         tally_labels = np.zeros(labels,dtype=np.uint64)
-        pd = SegmentationPrefetcher(data,categories=data.category_names(),once=True)
+        pd = SegmentationPrefetcher(data,categories=data.category_names(),
+                                    once=True,batch_size=settings.BATCH_SIZE,
+                                    ahead=settings.BATCH_SIZE)
 
         for batch in pd.batches():
             for concept_map in batch:

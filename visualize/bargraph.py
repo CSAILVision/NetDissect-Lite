@@ -179,7 +179,7 @@ def make_svg_bargraph(labels, heights, categories,
                         catcount, fix(cat + ('s' if catcount != 1 else '')))
         x += (barwidth + gap) * catcount
     # Output - this is the bare svg.
-    result = et.tostring(svg)
+    result = et.tostring(svg).decode("utf-8") #python3 needs byte conversion
     if filename:
         f = open(filename, 'w')
         # When writing to a file a special header is needed.

@@ -5,6 +5,7 @@ import re
 import random
 import signal
 import csv
+import settings
 from collections import OrderedDict
 from scipy.misc import imread
 from multiprocessing import Pool, cpu_count
@@ -60,7 +61,7 @@ class SegmentationData(AbstractSegmentation):
     def __init__(self, directory, categories=None, require_all=False):
         directory = os.path.expanduser(directory)
         self.directory = directory
-        with open(os.path.join(directory, 'index.csv')) as f:
+        with open(os.path.join(directory, settings.INDEX_FILE)) as f:
             self.image = [decode_index_dict(r) for r in csv.DictReader(f)]
         with open(os.path.join(directory, 'category.csv')) as f:
             self.category = OrderedDict()
@@ -188,7 +189,7 @@ class SegmentationData(AbstractSegmentation):
         '''
         Returns the set of category names.
         '''
-        return self.category.keys()
+        return list(self.category.keys())
 
     def category_frequency(self, category):
         '''
@@ -520,7 +521,7 @@ class SegmentationPrefetcher:
         while len(self.result_queue) < self.ahead:
             data = []
             while len(data) < self.batch_size:
-                job = self.next_job();
+                job = self.next_job()
                 if job is None:
                     break
                 data.append(job)
