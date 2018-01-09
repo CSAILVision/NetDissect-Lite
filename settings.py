@@ -13,5 +13,5 @@ TOPN = 5
 # sub settings
 if MODEL == 'resnet18':
     FEATURE_NAMES = ['layer4']
-    MODEL_FILE = "/Users/sunyiyou/.torch/models/resnet18-5c106cde.pth"
+    MODEL_FILE = None
     OUTPUT_FOLDER = "result/pytorch_resnet18_places365"
