@@ -73,26 +73,29 @@ class FeatureOperator:
                         maxfeatures[i] = np.memmap(mmap_max_files[i],dtype=float,mode='w+',shape=size_features)
                     else:
                         maxfeatures[i] = np.zeros(size_features)
-            if wholefeatures[0] is None:
+            if len(feat_batch.shape) == 4 and wholefeatures[0] is None:
                 # initialize the feature variable
                 for i, feat_batch in enumerate(features_blobs):
-                    size_features = (len(loader.indexes), feat_batch.shape[1], feat_batch.shape[2], feat_batch.shape[3])
+                    size_features = (
+                    len(loader.indexes), feat_batch.shape[1], feat_batch.shape[2], feat_batch.shape[3])
                     features_size[i] = size_features
                     if memmap:
-                        wholefeatures[i] = np.memmap(mmap_files[i],dtype=float,mode='w+',shape=size_features)
+                        wholefeatures[i] = np.memmap(mmap_files[i], dtype=float, mode='w+', shape=size_features)
                     else:
                         wholefeatures[i] = np.zeros(size_features)
-            np.save(features_size_file,features_size)
+            np.save(features_size_file, features_size)
             start_idx = batch_idx*settings.BATCH_SIZE
             end_idx = min((batch_idx+1)*settings.BATCH_SIZE, len(loader.indexes))
             for i, feat_batch in enumerate(features_blobs):
-                wholefeatures[i][start_idx:end_idx] = feat_batch
                 if len(feat_batch.shape) == 4:
+                    wholefeatures[i][start_idx:end_idx] = feat_batch
                     maxfeatures[i][start_idx:end_idx] = np.max(np.max(feat_batch,3),2)
                 elif len(feat_batch.shape) == 3:
                     maxfeatures[i][start_idx:end_idx] = np.max(feat_batch, 2)
                 elif len(feat_batch.shape) == 2:
                     maxfeatures[i][start_idx:end_idx] = feat_batch
+        if len(feat_batch.shape) == 2:
+            wholefeatures = maxfeatures
         return wholefeatures,maxfeatures
 
     def quantile_threshold(self, features):
@@ -103,7 +106,7 @@ class FeatureOperator:
             axis=[0]
         return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
 
-    def tally(self, features, threshold, parallel=0):
+    def tally(self, features, threshold, parallel=0, savepath=None):
         data  = self.data
         units = features.shape[1]
         labels = len(data.label)
@@ -138,8 +141,12 @@ class FeatureOperator:
                 for unit_id in range(units):
                     feature_map = features[img_index][unit_id]
                     if feature_map.max() > threshold[unit_id]:
-                        mask = imresize(feature_map, (concept_map['sh'],concept_map['sw']), mode='F')
-                        indexes = np.argwhere(mask > threshold[unit_id])
+                        if type(feature_map) == np.float64:
+                            #TODO too slow
+                            indexes = np.stack(np.meshgrid(range(concept_map['sh']), range(concept_map['sh']))).transpose(1, 2, 0).reshape(-1, 2)
+                        else:
+                            mask = imresize(feature_map, (concept_map['sh'],concept_map['sw']), mode='F')
+                            indexes = np.argwhere(mask > threshold[unit_id])
                         tally_units[unit_id] += len(indexes)
                         for pixel in pixels:
                             for index in indexes:
@@ -163,6 +170,7 @@ class FeatureOperator:
         bestcat_pciou = score_pciou.argsort(axis=0)[::-1]
         ordering = score_pciou.max(axis=0).argsort()[::-1]
         rets = [None] * len(ordering)
+
         for i,unit in enumerate(ordering):
             # Top images are top[unit]
             bestcat = bestcat_pciou[0, unit]
@@ -182,6 +190,21 @@ class FeatureOperator:
                     '%s-iou' % cat: score_pciou[ci][unit]
                 })
             rets[i] = data
+
+        if savepath:
+            import csv
+            csv_fields = sum([[
+                '%s-label' % cat,
+                '%s-truth' % cat,
+                '%s-activation' % cat,
+                '%s-intersect' % cat,
+                '%s-iou' % cat] for cat in categories],
+                ['unit', 'category', 'label', 'score'])
+            with open(os.path.join(settings.OUTPUT_FOLDER,savepath), 'w') as f:
+                writer = csv.DictWriter(f, csv_fields)
+                writer.writeheader()
+                for i in range(len(ordering)):
+                    writer.writerow(rets[i])
         return rets
 
 def primary_categories_per_index(ds, categories=None):
