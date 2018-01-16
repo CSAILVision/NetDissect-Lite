@@ -1,6 +1,6 @@
 # global settings
 GPU = True
-TEST_MODE = False
+TEST_MODE = True
 MODEL = 'resnet18'
 NUM_CLASSES = 1000
 QUANTILE = 0.05
