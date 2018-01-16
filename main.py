@@ -7,7 +7,7 @@ fo = FeatureOperator()
 model = loadmodel(hook_feature)
 
 ############ STEP 1: feature extraction ###############
-features, maxfeature = fo.feature_extraction(model=model, feature_names=settings.FEATURE_NAMES)
+features, maxfeature = fo.feature_extraction(model=model)
 
 for layer_id,layer in enumerate(settings.FEATURE_NAMES):
 ############ STEP 2: calculating threshold ############

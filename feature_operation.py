@@ -16,17 +16,39 @@ class FeatureOperator:
 
     def __init__(self):
         if not os.path.exists(settings.OUTPUT_FOLDER):
-            os.makedirs(settings.OUTPUT_FOLDER + '/image')
+            os.makedirs(os.path.join(settings.OUTPUT_FOLDER, 'image'))
         self.data = SegmentationData(settings.DATA_DIRECTORY)
         self.loader = SegmentationPrefetcher(self.data,categories=['image'],once=True,batch_size=settings.BATCH_SIZE)
         self.mean = [109.5388,118.6897,124.6901]
 
-    def feature_extraction(self,model=None,feature_names=None):
+    def feature_extraction(self,model=None,memmap=True):
         loader = self.loader
         # extract the max value activaiton for each image
         imglist_results = []
-        maxfeatures = [None] * len(feature_names)
-        wholefeatures = [None] * len(feature_names)
+        maxfeatures = [None] * len(settings.FEATURE_NAMES)
+        wholefeatures = [None] * len(settings.FEATURE_NAMES)
+        features_size = [None] * len(settings.FEATURE_NAMES)
+        features_size_file = os.path.join(settings.OUTPUT_FOLDER, "feature_size.npy")
+
+        if memmap:
+            skip = True
+            mmap_files =  [os.path.join(settings.OUTPUT_FOLDER, "%s.mmap" % feature_name)  for feature_name in  settings.FEATURE_NAMES]
+            mmap_max_files = [os.path.join(settings.OUTPUT_FOLDER, "%s_max.mmap" % feature_name) for feature_name in settings.FEATURE_NAMES]
+            if os.path.exists(features_size_file):
+                features_size = np.load(features_size_file)
+            else:
+                skip = False
+            for i, (mmap_file, mmap_max_file) in enumerate(zip(mmap_files,mmap_max_files)):
+                if os.path.exists(mmap_file) and os.path.exists(mmap_max_file) and features_size[i] is not None:
+                    print('loading features %s' % settings.FEATURE_NAMES[i])
+                    wholefeatures[i] = np.memmap(mmap_file, dtype=float,mode='r', shape=tuple(features_size[i]))
+                    maxfeatures[i] = np.memmap(mmap_max_file, dtype=float, mode='r', shape=tuple(features_size[i][:2]))
+                else:
+                    print('file missing, load again')
+                    skip = False
+            if skip:
+                return wholefeatures, maxfeatures
+
         num_batches = (len(loader.indexes) + loader.batch_size - 1) / loader.batch_size
         for batch_idx,batch in enumerate(loader.tensor_batches(bgr_mean=self.mean)):
             del features_blobs[:]
@@ -47,12 +69,20 @@ class FeatureOperator:
                 # initialize the feature variable
                 for i, feat_batch in enumerate(features_blobs):
                     size_features = (len(loader.indexes), feat_batch.shape[1])
-                    maxfeatures[i] = np.zeros(size_features)
+                    if memmap:
+                        maxfeatures[i] = np.memmap(mmap_max_files[i],dtype=float,mode='w+',shape=size_features)
+                    else:
+                        maxfeatures[i] = np.zeros(size_features)
             if wholefeatures[0] is None:
                 # initialize the feature variable
                 for i, feat_batch in enumerate(features_blobs):
                     size_features = (len(loader.indexes), feat_batch.shape[1], feat_batch.shape[2], feat_batch.shape[3])
-                    wholefeatures[i] = np.zeros(size_features)
+                    features_size[i] = size_features
+                    if memmap:
+                        wholefeatures[i] = np.memmap(mmap_files[i],dtype=float,mode='w+',shape=size_features)
+                    else:
+                        wholefeatures[i] = np.zeros(size_features)
+            np.save(features_size_file,features_size)
             start_idx = batch_idx*settings.BATCH_SIZE
             end_idx = min((batch_idx+1)*settings.BATCH_SIZE, len(loader.indexes))
             for i, feat_batch in enumerate(features_blobs):
@@ -73,7 +103,7 @@ class FeatureOperator:
             axis=[0]
         return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
 
-    def tally(self, features, threshold):
+    def tally(self, features, threshold, parallel=0):
         data  = self.data
         units = features.shape[1]
         labels = len(data.label)

@@ -1,6 +1,6 @@
 # global settings
-GPU = True
-TEST_MODE = False
+GPU = False
+TEST_MODE = True
 MODEL = 'resnet18'
 NUM_CLASSES = 1000
 QUANTILE = 0.05
@@ -14,7 +14,7 @@ TOPN = 5
 if MODEL == 'resnet18':
     FEATURE_NAMES = ['layer4']
     MODEL_FILE = None
-    OUTPUT_FOLDER = "result/pytorch_resnet18_places365"
+    OUTPUT_FOLDER = "result/pytorch_resnet18_imagenet"
 
 if TEST_MODE:
     WORKERS = 1
