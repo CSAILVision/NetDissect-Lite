@@ -125,6 +125,7 @@ class FeatureOperator:
             last_batch_time = batch_time
 
             print('labelprobe image index %d, items per sec %.4f, %.4f' % (count, rate, batch_rate))
+
             for concept_map in batch:
                 count += 1
                 img_index = concept_map['i']
@@ -140,10 +141,9 @@ class FeatureOperator:
                         pixels.append(label_group)
                 for scalar in scalars:
                     tally_labels[scalar] += concept_map['sh'] * concept_map['sw']
-                for pixel in pixels:
-                    for si in range(concept_map['sh']):
-                        for sj in range(concept_map['sw']):
-                            tally_labels[pixel[0, si, sj]] += 1
+                if pixels:
+                    tally_label = np.bincount(np.concatenate(pixels).ravel())
+                    tally_labels[:len(tally_label)] += tally_label
 
                 for unit_id in range(units):
                     feature_map = features[img_index][unit_id]
@@ -167,9 +167,9 @@ class FeatureOperator:
     def tally(self, features, threshold, savepath=None):
         units = features.shape[1]
         labels = len(self.data.label)
-        tally_both = np.zeros((units,labels),dtype=np.uint64)
-        tally_units = np.zeros(units,dtype=np.uint64)
-        tally_labels = np.zeros(labels,dtype=np.uint64)
+        tally_both = np.zeros((units,labels),dtype=np.float64)
+        tally_units = np.zeros(units,dtype=np.float64)
+        tally_labels = np.zeros(labels,dtype=np.float64)
 
         if settings.PARALLEL > 1:
             psize = int(np.ceil(float(self.data.size()) / settings.PARALLEL))
