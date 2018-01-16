@@ -5,7 +5,8 @@ from scipy.misc import imresize
 import numpy as np
 import torch
 import settings
-import multiprocessing as mp
+import time
+import multiprocessing.pool as pool
 from data_loader.loadseg import SegmentationData, SegmentationPrefetcher
 
 features_blobs = []
@@ -22,7 +23,7 @@ class FeatureOperator:
         self.loader = SegmentationPrefetcher(self.data,categories=['image'],once=True,batch_size=settings.BATCH_SIZE)
         self.mean = [109.5388,118.6897,124.6901]
 
-    def feature_extraction(self,model=None,memmap=True):
+    def feature_extraction(self, model=None, memmap=True):
         loader = self.loader
         # extract the max value activaiton for each image
         imglist_results = []
@@ -45,7 +46,7 @@ class FeatureOperator:
                     wholefeatures[i] = np.memmap(mmap_file, dtype=float,mode='r', shape=tuple(features_size[i]))
                     maxfeatures[i] = np.memmap(mmap_max_file, dtype=float, mode='r', shape=tuple(features_size[i][:2]))
                 else:
-                    print('file missing, load again')
+                    print('file missing, loading from scratch')
                     skip = False
             if skip:
                 return wholefeatures, maxfeatures
@@ -107,67 +108,85 @@ class FeatureOperator:
             axis=[0]
         return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
 
-    def tally(self, features, threshold, savepath=None):
-        data  = self.data
+    @staticmethod
+    def tally_job(args):
+        features, data, threshold, tally_labels, tally_units, tally_both, start, end = args
         units = features.shape[1]
-        labels = len(data.label)
+        pd = SegmentationPrefetcher(data, categories=data.category_names(),
+                                    once=True, batch_size=settings.TALLY_BATCH_SIZE,
+                                    ahead=settings.TALLY_AHEAD, start=start, end=end)
+        count = start
+        start_time = time.time()
+        last_batch_time = start_time
+        for batch in pd.batches():
+            batch_time = time.time()
+            rate = (count - start) / (batch_time - start_time + 1e-15)
+            batch_rate = len(batch) / (batch_time - last_batch_time + 1e-15)
+            last_batch_time = batch_time
+
+            print('labelprobe image index %d, items per sec %.4f, %.4f' % (count, rate, batch_rate))
+            for concept_map in batch:
+                count += 1
+                img_index = concept_map['i']
+                scalars, pixels = [], []
+                for cat in data.category_names():
+                    label_group = concept_map[cat]
+                    shape = np.shape(label_group)
+                    if len(shape) % 2 == 0:
+                        label_group = [label_group]
+                    if len(shape) < 2:
+                        scalars += label_group
+                    else:
+                        pixels.append(label_group)
+                for scalar in scalars:
+                    tally_labels[scalar] += concept_map['sh'] * concept_map['sw']
+                for pixel in pixels:
+                    for si in range(concept_map['sh']):
+                        for sj in range(concept_map['sw']):
+                            tally_labels[pixel[0, si, sj]] += 1
+
+                for unit_id in range(units):
+                    feature_map = features[img_index][unit_id]
+                    if feature_map.max() > threshold[unit_id]:
+                        if type(feature_map) == np.float64:
+                            # TODO too slow
+                            indexes = np.stack(
+                                np.meshgrid(range(concept_map['sh']), range(concept_map['sh']))).transpose(1, 2,
+                                                                                                           0).reshape(
+                                -1, 2)
+                        else:
+                            mask = imresize(feature_map, (concept_map['sh'], concept_map['sw']), mode='F')
+                            indexes = np.argwhere(mask > threshold[unit_id])
+                        tally_units[unit_id] += len(indexes)
+                        for pixel in pixels:
+                            for index in indexes:
+                                tally_both[unit_id, pixel[0, index[0], index[1]]] += 1
+                        for scalar in scalars:
+                            tally_both[unit_id, scalar] += len(indexes)
+
+    def tally(self, features, threshold, savepath=None):
+        units = features.shape[1]
+        labels = len(self.data.label)
         tally_both = np.zeros((units,labels),dtype=np.uint64)
         tally_units = np.zeros(units,dtype=np.uint64)
         tally_labels = np.zeros(labels,dtype=np.uint64)
 
-        psize = int(np.ceil(float(self.data.size()) / settings.PARALLEL))
-        ranges = [(s, min(self.data.size(), s + psize)) for s in range(0, data.size(), psize) if s < data.size()]
-        pool = mp.Pool(processes=settings.PARALLEL)
-
-        def tally_job(range):
-            pd = SegmentationPrefetcher(data,categories=data.category_names(),
-                                        once=True,batch_size=settings.BATCH_SIZE,
-                                        ahead=settings.BATCH_SIZE, start=range[0], end=range[1])
-            for batch in pd.batches():
-                for concept_map in batch:
-                    img_index = concept_map['i']
-                    print('labelprobe image index %s' % str(img_index))
-                    scalars,pixels = [],[]
-                    for cat in data.category_names():
-                        label_group = concept_map[cat]
-                        shape = np.shape(label_group)
-                        if len(shape) % 2 == 0:
-                            label_group = [label_group]
-                        if len(shape) < 2:
-                            scalars += label_group
-                        else:
-                            pixels.append(label_group)
-                    for scalar in scalars:
-                        tally_labels[scalar] += concept_map['sh'] * concept_map['sw']
-                    for pixel in pixels:
-                        for si in range(concept_map['sh']):
-                            for sj in range(concept_map['sw']):
-                                tally_labels[pixel[0,si,sj]] += 1
-
-                    for unit_id in range(units):
-                        feature_map = features[img_index][unit_id]
-                        if feature_map.max() > threshold[unit_id]:
-                            if type(feature_map) == np.float64:
-                                #TODO too slow
-                                indexes = np.stack(np.meshgrid(range(concept_map['sh']), range(concept_map['sh']))).transpose(1, 2, 0).reshape(-1, 2)
-                            else:
-                                mask = imresize(feature_map, (concept_map['sh'],concept_map['sw']), mode='F')
-                                indexes = np.argwhere(mask > threshold[unit_id])
-                            tally_units[unit_id] += len(indexes)
-                            for pixel in pixels:
-                                for index in indexes:
-                                    tally_both[unit_id, pixel[0,index[0],index[1]]] += 1
-                            for scalar in scalars:
-                                tally_both[unit_id, scalar] += len(indexes)
-
-        categories = data.category_names()
-        primary_categories = primary_categories_per_index(data, categories=categories)
-        labelcat = onehot(primary_categories)
+        if settings.PARALLEL > 1:
+            psize = int(np.ceil(float(self.data.size()) / settings.PARALLEL))
+            ranges = [(s, min(self.data.size(), s + psize)) for s in range(0, self.data.size(), psize) if
+                      s < self.data.size()]
+            params = [(features, self.data, threshold, tally_labels, tally_units, tally_both) + r for r in ranges]
+            threadpool = pool.ThreadPool(processes=settings.PARALLEL)
+            threadpool.map(FeatureOperator.tally_job, params)
+        else:
+            FeatureOperator.tally_job((features, self.data, threshold, tally_labels, tally_units, tally_both, 0, self.data.size()))
+        categories = self.data.category_names()
+        primary_categories = primary_categories_per_index(self.data, categories=categories)
         iou = tally_both / (tally_units.transpose()[:,np.newaxis] + tally_labels[np.newaxis,:] - tally_both + 1e-10)
-        pciou = np.array([iou * (primary_categories[np.arange(iou.shape[1])] == ci)[np.newaxis, :] for ci in range(len(data.category_names()))])
+        pciou = np.array([iou * (primary_categories[np.arange(iou.shape[1])] == ci)[np.newaxis, :] for ci in range(len(self.data.category_names()))])
         label_pciou = pciou.argmax(axis=2)
         name_pciou = [
-            [data.name(None, j) for j in label_pciou[ci]]
+            [self.data.name(None, j) for j in label_pciou[ci]]
             for ci in range(len(label_pciou))]
         score_pciou = pciou[
             np.arange(pciou.shape[0])[:, np.newaxis],
@@ -232,17 +251,3 @@ def primary_categories_per_index(ds, categories=None):
             for ic, cat in enumerate(categories))
         result.append(maxcat)
     return np.array(result)
-
-def onehot(arr, minlength=None):
-    '''
-    Expands an array of integers in one-hot encoding by adding a new last
-    dimension, leaving zeros everywhere except for the nth dimension, where
-    the original array contained the integer n.  The minlength parameter is
-    used to indcate the minimum size of the new dimension.
-    '''
-    length = np.amax(arr) + 1
-    if minlength is not None:
-        length = max(minlength, length)
-    result = np.zeros(arr.shape + (length,))
-    result[list(np.indices(arr.shape)) + [arr]] = 1
-    return result
