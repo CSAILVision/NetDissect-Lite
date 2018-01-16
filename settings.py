@@ -7,7 +7,7 @@ QUANTILE = 0.05
 DATA_DIRECTORY = '../NetDissect/dataset/broden1_224'
 IMG_SIZE = 224
 TOPN = 5
-
+PARALLEL = 4
 
 
 # sub settings

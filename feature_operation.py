@@ -5,6 +5,7 @@ from scipy.misc import imresize
 import numpy as np
 import torch
 import settings
+import multiprocessing as mp
 from data_loader.loadseg import SegmentationData, SegmentationPrefetcher
 
 features_blobs = []
@@ -106,53 +107,58 @@ class FeatureOperator:
             axis=[0]
         return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
 
-    def tally(self, features, threshold, parallel=0, savepath=None):
+    def tally(self, features, threshold, savepath=None):
         data  = self.data
         units = features.shape[1]
         labels = len(data.label)
         tally_both = np.zeros((units,labels),dtype=np.uint64)
         tally_units = np.zeros(units,dtype=np.uint64)
         tally_labels = np.zeros(labels,dtype=np.uint64)
-        pd = SegmentationPrefetcher(data,categories=data.category_names(),
-                                    once=True,batch_size=settings.BATCH_SIZE,
-                                    ahead=settings.BATCH_SIZE)
 
-        for batch in pd.batches():
-            for concept_map in batch:
-                img_index = concept_map['i']
-                print('labelprobe image index %s' % str(img_index))
-                scalars,pixels = [],[]
-                for cat in data.category_names():
-                    label_group = concept_map[cat]
-                    shape = np.shape(label_group)
-                    if len(shape) % 2 == 0:
-                        label_group = [label_group]
-                    if len(shape) < 2:
-                        scalars += label_group
-                    else:
-                        pixels.append(label_group)
-                for scalar in scalars:
-                    tally_labels[scalar] += concept_map['sh'] * concept_map['sw']
-                for pixel in pixels:
-                    for si in range(concept_map['sh']):
-                        for sj in range(concept_map['sw']):
-                            tally_labels[pixel[0,si,sj]] += 1
+        psize = int(np.ceil(float(self.data.size()) / settings.PARALLEL))
+        ranges = [(s, min(self.data.size(), s + psize)) for s in range(0, data.size(), psize) if s < data.size()]
+        pool = mp.Pool(processes=settings.PARALLEL)
 
-                for unit_id in range(units):
-                    feature_map = features[img_index][unit_id]
-                    if feature_map.max() > threshold[unit_id]:
-                        if type(feature_map) == np.float64:
-                            #TODO too slow
-                            indexes = np.stack(np.meshgrid(range(concept_map['sh']), range(concept_map['sh']))).transpose(1, 2, 0).reshape(-1, 2)
+        def tally_job(range):
+            pd = SegmentationPrefetcher(data,categories=data.category_names(),
+                                        once=True,batch_size=settings.BATCH_SIZE,
+                                        ahead=settings.BATCH_SIZE, start=range[0], end=range[1])
+            for batch in pd.batches():
+                for concept_map in batch:
+                    img_index = concept_map['i']
+                    print('labelprobe image index %s' % str(img_index))
+                    scalars,pixels = [],[]
+                    for cat in data.category_names():
+                        label_group = concept_map[cat]
+                        shape = np.shape(label_group)
+                        if len(shape) % 2 == 0:
+                            label_group = [label_group]
+                        if len(shape) < 2:
+                            scalars += label_group
                         else:
-                            mask = imresize(feature_map, (concept_map['sh'],concept_map['sw']), mode='F')
-                            indexes = np.argwhere(mask > threshold[unit_id])
-                        tally_units[unit_id] += len(indexes)
-                        for pixel in pixels:
-                            for index in indexes:
-                                tally_both[unit_id, pixel[0,index[0],index[1]]] += 1
-                        for scalar in scalars:
-                            tally_both[unit_id, scalar] += len(indexes)
+                            pixels.append(label_group)
+                    for scalar in scalars:
+                        tally_labels[scalar] += concept_map['sh'] * concept_map['sw']
+                    for pixel in pixels:
+                        for si in range(concept_map['sh']):
+                            for sj in range(concept_map['sw']):
+                                tally_labels[pixel[0,si,sj]] += 1
+
+                    for unit_id in range(units):
+                        feature_map = features[img_index][unit_id]
+                        if feature_map.max() > threshold[unit_id]:
+                            if type(feature_map) == np.float64:
+                                #TODO too slow
+                                indexes = np.stack(np.meshgrid(range(concept_map['sh']), range(concept_map['sh']))).transpose(1, 2, 0).reshape(-1, 2)
+                            else:
+                                mask = imresize(feature_map, (concept_map['sh'],concept_map['sw']), mode='F')
+                                indexes = np.argwhere(mask > threshold[unit_id])
+                            tally_units[unit_id] += len(indexes)
+                            for pixel in pixels:
+                                for index in indexes:
+                                    tally_both[unit_id, pixel[0,index[0],index[1]]] += 1
+                            for scalar in scalars:
+                                tally_both[unit_id, scalar] += len(indexes)
 
         categories = data.category_names()
         primary_categories = primary_categories_per_index(data, categories=categories)
