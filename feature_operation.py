@@ -7,7 +7,8 @@ import torch
 import settings
 import time
 import multiprocessing.pool as pool
-from data_loader.loadseg import SegmentationData, SegmentationPrefetcher
+from loader.data_loader import load_csv
+from loader.data_loader import SegmentationData, SegmentationPrefetcher
 
 features_blobs = []
 def hook_feature(module, input, output):
@@ -110,7 +111,7 @@ class FeatureOperator:
 
     @staticmethod
     def tally_job(args):
-        features, data, threshold, tally_labels, tally_units, tally_both, start, end = args
+        features, data, threshold, tally_labels, tally_units, tally_units_cat, tally_both, start, end = args
         units = features.shape[1]
         pd = SegmentationPrefetcher(data, categories=data.category_names(),
                                     once=True, batch_size=settings.TALLY_BATCH_SIZE,
@@ -142,7 +143,10 @@ class FeatureOperator:
                 for scalar in scalars:
                     tally_labels[scalar] += concept_map['sh'] * concept_map['sw']
                 if pixels:
-                    tally_label = np.bincount(np.concatenate(pixels).ravel())
+                    pixels = np.concatenate(pixels)
+                    tally_label = np.bincount(pixels.ravel())
+                    if len(tally_label) > 0:
+                        tally_label[0] = 0
                     tally_labels[:len(tally_label)] += tally_label
 
                 for unit_id in range(units):
@@ -158,31 +162,45 @@ class FeatureOperator:
                             mask = imresize(feature_map, (concept_map['sh'], concept_map['sw']), mode='F')
                             indexes = np.argwhere(mask > threshold[unit_id])
                         tally_units[unit_id] += len(indexes)
-                        for pixel in pixels:
-                            for index in indexes:
-                                tally_both[unit_id, pixel[0, index[0], index[1]]] += 1
+                        if len(pixels) > 0:
+                            tally_bt = np.bincount(pixels[:, indexes[:, 0], indexes[:, 1]].ravel())
+                            if len(tally_bt) > 0:
+                                tally_bt[0] = 0
+                            tally_cat = np.dot(tally_bt[None,:], data.labelcat[:len(tally_bt), :])[0]
+                            tally_both[unit_id,:len(tally_bt)] += tally_bt
                         for scalar in scalars:
+                            tally_cat += data.labelcat[scalar]
                             tally_both[unit_id, scalar] += len(indexes)
+                        tally_units_cat[unit_id] += len(indexes) * (tally_cat > 0)
+
 
     def tally(self, features, threshold, savepath=None):
+        csvpath = os.path.join(settings.OUTPUT_FOLDER, savepath)
+        if savepath and os.path.exists(csvpath):
+            return load_csv(csvpath)
+
         units = features.shape[1]
         labels = len(self.data.label)
+        categories = self.data.category_names()
         tally_both = np.zeros((units,labels),dtype=np.float64)
         tally_units = np.zeros(units,dtype=np.float64)
+        tally_units_cat = np.zeros((units,len(categories)), dtype=np.float64)
         tally_labels = np.zeros(labels,dtype=np.float64)
 
         if settings.PARALLEL > 1:
             psize = int(np.ceil(float(self.data.size()) / settings.PARALLEL))
             ranges = [(s, min(self.data.size(), s + psize)) for s in range(0, self.data.size(), psize) if
                       s < self.data.size()]
-            params = [(features, self.data, threshold, tally_labels, tally_units, tally_both) + r for r in ranges]
+            params = [(features, self.data, threshold, tally_labels, tally_units, tally_units_cat, tally_both) + r for r in ranges]
             threadpool = pool.ThreadPool(processes=settings.PARALLEL)
             threadpool.map(FeatureOperator.tally_job, params)
         else:
-            FeatureOperator.tally_job((features, self.data, threshold, tally_labels, tally_units, tally_both, 0, self.data.size()))
-        categories = self.data.category_names()
-        primary_categories = primary_categories_per_index(self.data, categories=categories)
-        iou = tally_both / (tally_units.transpose()[:,np.newaxis] + tally_labels[np.newaxis,:] - tally_both + 1e-10)
+            FeatureOperator.tally_job((features, self.data, threshold, tally_labels, tally_units, tally_units_cat, tally_both, 0, self.data.size()))
+
+        np.dot(tally_units_cat, self.data.labelcat.T)
+        primary_categories = self.data.primary_categories_per_index()
+        tally_units_cat = np.dot(tally_units_cat, self.data.labelcat.T)
+        iou = tally_both / (tally_units_cat + tally_labels[np.newaxis,:] - tally_both + 1e-10)
         pciou = np.array([iou * (primary_categories[np.arange(iou.shape[1])] == ci)[np.newaxis, :] for ci in range(len(self.data.category_names()))])
         label_pciou = pciou.argmax(axis=2)
         name_pciou = [
@@ -210,7 +228,7 @@ class FeatureOperator:
                 data.update({
                     '%s-label' % cat: name_pciou[ci][unit],
                     '%s-truth' % cat: tally_labels[label],
-                    '%s-activation' % cat: tally_units[unit],
+                    '%s-activation' % cat: tally_units_cat[unit, label],
                     '%s-intersect' % cat: tally_both[unit, label],
                     '%s-iou' % cat: score_pciou[ci][unit]
                 })
@@ -225,29 +243,10 @@ class FeatureOperator:
                 '%s-intersect' % cat,
                 '%s-iou' % cat] for cat in categories],
                 ['unit', 'category', 'label', 'score'])
-            with open(os.path.join(settings.OUTPUT_FOLDER,savepath), 'w') as f:
+            with open(csvpath, 'w') as f:
                 writer = csv.DictWriter(f, csv_fields)
                 writer.writeheader()
                 for i in range(len(ordering)):
                     writer.writerow(rets[i])
         return rets
 
-def primary_categories_per_index(ds, categories=None):
-    '''
-    Returns an array of primary category numbers for each label, where the
-    first category listed in ds.category_names is given category number 0.
-    '''
-    catmap = {}
-    for cat in categories:
-        imap = ds.category_index_map(cat)
-        if len(imap) < ds.label_size(None):
-            imap = np.concatenate((imap, np.zeros(
-                ds.label_size(None) - len(imap), dtype=imap.dtype)))
-        catmap[cat] = imap
-    result = []
-    for i in range(ds.label_size(None)):
-        maxcov, maxcat = max(
-            (ds.coverage(cat, catmap[cat][i]) if catmap[cat][i] else 0, ic)
-            for ic, cat in enumerate(categories))
-        result.append(maxcat)
-    return np.array(result)

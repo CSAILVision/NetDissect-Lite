@@ -24,8 +24,8 @@ def fix(s):
 
 
 def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=None,
-        imsize=None, imcount=5, imscale=72, tally_result=None,
-        gridwidth=None, gap=3, limit=None, force=False, threshold=0.04, verbose=False):
+        imsize=None, imscale=72, tally_result=None,
+        gridwidth=None, gap=3, limit=None, force=False, verbose=False):
     ed = expdir.ExperimentDirectory(settings.OUTPUT_FOLDER)
     print('Generating html summary %s' % ed.filename('html/%s.html' % expdir.fn_safe(layer)))
     # Grab tally stats
@@ -54,22 +54,22 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
     html.append('<div class="layerinfo">')
     html.append('%d/%d units covering %d concepts with IoU &ge; %.2f' % (
         len([record for record in rendered_order
-            if float(record['score']) >= threshold]),
+            if float(record['score']) >= settings.QUANTILE]),
         len(rendered_order),
         len(set(record['label'] for record in rendered_order
-            if float(record['score']) >= threshold)),
-        threshold))
+            if float(record['score']) >= settings.QUANTILE)),
+        settings.QUANTILE))
     html.append('</div>')
     html.append(html_sortheader)
     html.append('</div>')
 
     if gridwidth is None:
         gridname = ''
-        gridwidth = imcount
+        gridwidth = settings.TOPN
         gridheight = 1
     else:
         gridname = '-%d' % gridwidth
-        gridheight = (imcount + gridwidth - 1) // gridwidth
+        gridheight = (settings.TOPN + gridwidth - 1) // gridwidth
 
     html.append('<div class="unitgrid"') # Leave off > to eat spaces
     if limit is not None:
@@ -101,7 +101,7 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
                       col*(imsize+gap):col*(imsize+gap)+imsize,:] = vis
             imsave(ed.filename('html/' + imfn), tiled)
         # Generate the wrapper HTML
-        graytext = ' lowscore' if float(record['score']) < threshold else ''
+        graytext = ' lowscore' if float(record['score']) < settings.QUANTILE else ''
         html.append('><div class="unit%s" data-order="%d %d %d">' %
                 (graytext, label_order, record['score-order'], unit + 1))
         html.append('<div class="unitlabel">%s</div>' % fix(record['label']))

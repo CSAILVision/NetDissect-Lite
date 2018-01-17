@@ -3,8 +3,8 @@ GPU = True
 TEST_MODE = False
 MODEL = 'resnet18'
 DATASET = 'places365'
-QUANTILE = 0.05
-TOPN = 20
+QUANTILE = 0.04
+TOPN = 10
 PARALLEL = 1
 
 
@@ -32,6 +32,7 @@ if TEST_MODE:
     TALLY_BATCH_SIZE = 2
     TALLY_AHEAD = 1
     INDEX_FILE = 'index_sm.csv'
+    OUTPUT_FOLDER += "_test"
 else:
     WORKERS = 8
     BATCH_SIZE = 128
