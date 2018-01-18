@@ -89,18 +89,12 @@ class SegmentationData(AbstractSegmentation):
         with open(os.path.join(directory, 'category.csv')) as f:
             self.category = OrderedDict()
             for row in csv.DictReader(f):
-                self.category[row['name']] = row
+                if categories and row['name'] in categories:
+                    self.category[row['name']] = row
+        categories = self.category.keys()
         with open(os.path.join(directory, 'label.csv')) as f:
             label_data = [decode_label_dict(r) for r in csv.DictReader(f)]
         self.label = build_dense_label_array(label_data)
-        if categories is not None:
-            # Filter out unused categories
-            categories = set([c for c in categories if c in self.category])
-            for cat in self.category.keys():
-                if cat not in categories:
-                    del self.category[cat]
-        else:
-            categories = self.category.keys()
         # Filter out images with insufficient data
         filter_fn = partial(
                 index_has_all_data if require_all else index_has_any_data,

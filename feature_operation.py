@@ -6,13 +6,15 @@ import numpy as np
 import torch
 import settings
 import time
+import util.upsample as upsample
+import util.vecquantile as vecquantile
 import multiprocessing.pool as pool
 from loader.data_loader import load_csv
 from loader.data_loader import SegmentationData, SegmentationPrefetcher
 
 features_blobs = []
 def hook_feature(module, input, output):
-    features_blobs.append(np.squeeze(output.data.cpu().numpy()))
+    features_blobs.append(output.data.cpu().numpy())
 
 
 class FeatureOperator:
@@ -20,14 +22,13 @@ class FeatureOperator:
     def __init__(self):
         if not os.path.exists(settings.OUTPUT_FOLDER):
             os.makedirs(os.path.join(settings.OUTPUT_FOLDER, 'image'))
-        self.data = SegmentationData(settings.DATA_DIRECTORY)
+        self.data = SegmentationData(settings.DATA_DIRECTORY, categories=settings.CATAGORIES)
         self.loader = SegmentationPrefetcher(self.data,categories=['image'],once=True,batch_size=settings.BATCH_SIZE)
         self.mean = [109.5388,118.6897,124.6901]
 
     def feature_extraction(self, model=None, memmap=True):
         loader = self.loader
         # extract the max value activaiton for each image
-        imglist_results = []
         maxfeatures = [None] * len(settings.FEATURE_NAMES)
         wholefeatures = [None] * len(settings.FEATURE_NAMES)
         features_size = [None] * len(settings.FEATURE_NAMES)
@@ -101,18 +102,36 @@ class FeatureOperator:
             wholefeatures = maxfeatures
         return wholefeatures,maxfeatures
 
-    def quantile_threshold(self, features):
+    def quantile_threshold(self, features, savepath=''):
+        qtpath = os.path.join(settings.OUTPUT_FOLDER, savepath)
+        if savepath and os.path.exists(qtpath):
+            return np.load(qtpath)
         print("calculating quantile threshold")
-        if len(features.shape) == 4:
-            axis=[0,2,3]
-        elif len(features.shape) == 2:
-            axis=[0]
-        return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
+        quant = vecquantile.QuantileVector(depth=features.shape[1], seed=1)
+        start_time = time.time()
+        last_batch_time = start_time
+        batch_size = 64
+        for i in range(0, features.shape[0], batch_size):
+            batch_time = time.time()
+            rate = i / (batch_time - start_time + 1e-15)
+            batch_rate = batch_size / (batch_time - last_batch_time + 1e-15)
+            last_batch_time = batch_time
+            print('Processing quantile index %d: %f %f' % (i, rate, batch_rate))
+            batch = features[i:i + batch_size]
+            batch = np.transpose(batch, axes=(0, 2, 3, 1)).reshape(-1, features.shape[1])
+            quant.add(batch)
+        ret = quant.readout(1000)[:, int(1000 * (1-settings.QUANTILE)-1)]
+        if savepath:
+            np.save(qtpath, ret)
+        return ret
+        # return np.percentile(features,100*(1 - settings.QUANTILE),axis=axis)
 
     @staticmethod
     def tally_job(args):
         features, data, threshold, tally_labels, tally_units, tally_units_cat, tally_both, start, end = args
         units = features.shape[1]
+        size_RF = (settings.IMG_SIZE / features.shape[2], settings.IMG_SIZE / features.shape[3])
+        fieldmap = ((0, 0), size_RF, size_RF)
         pd = SegmentationPrefetcher(data, categories=data.category_names(),
                                     once=True, batch_size=settings.TALLY_BATCH_SIZE,
                                     ahead=settings.TALLY_AHEAD, start=start, end=end)
@@ -152,15 +171,11 @@ class FeatureOperator:
                 for unit_id in range(units):
                     feature_map = features[img_index][unit_id]
                     if feature_map.max() > threshold[unit_id]:
-                        if type(feature_map) == np.float64:
-                            # TODO too slow
-                            indexes = np.stack(
-                                np.meshgrid(range(concept_map['sh']), range(concept_map['sh']))).transpose(1, 2,
-                                                                                                           0).reshape(
-                                -1, 2)
-                        else:
-                            mask = imresize(feature_map, (concept_map['sh'], concept_map['sw']), mode='F')
-                            indexes = np.argwhere(mask > threshold[unit_id])
+                        mask = imresize(feature_map, (concept_map['sh'], concept_map['sw']), mode='F')
+                        #reduction = int(round(settings.IMG_SIZE / float(concept_map['sh'])))
+                        #mask = upsample.upsampleL(fieldmap, feature_map, shape=(concept_map['sh'], concept_map['sw']), reduction=reduction)
+                        indexes = np.argwhere(mask > threshold[unit_id])
+
                         tally_units[unit_id] += len(indexes)
                         if len(pixels) > 0:
                             tally_bt = np.bincount(pixels[:, indexes[:, 0], indexes[:, 1]].ravel())
@@ -174,7 +189,7 @@ class FeatureOperator:
                         tally_units_cat[unit_id] += len(indexes) * (tally_cat > 0)
 
 
-    def tally(self, features, threshold, savepath=None):
+    def tally(self, features, threshold, savepath=''):
         csvpath = os.path.join(settings.OUTPUT_FOLDER, savepath)
         if savepath and os.path.exists(csvpath):
             return load_csv(csvpath)
@@ -197,7 +212,6 @@ class FeatureOperator:
         else:
             FeatureOperator.tally_job((features, self.data, threshold, tally_labels, tally_units, tally_units_cat, tally_both, 0, self.data.size()))
 
-        np.dot(tally_units_cat, self.data.labelcat.T)
         primary_categories = self.data.primary_categories_per_index()
         tally_units_cat = np.dot(tally_units_cat, self.data.labelcat.T)
         iou = tally_both / (tally_units_cat + tally_labels[np.newaxis,:] - tally_both + 1e-10)
