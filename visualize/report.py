@@ -54,11 +54,11 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
     html.append('<div class="layerinfo">')
     html.append('%d/%d units covering %d concepts with IoU &ge; %.2f' % (
         len([record for record in rendered_order
-            if float(record['score']) >= settings.QUANTILE]),
+            if float(record['score']) >= settings.SCORE_THRESHOLD]),
         len(rendered_order),
         len(set(record['label'] for record in rendered_order
-            if float(record['score']) >= settings.QUANTILE)),
-        settings.QUANTILE))
+            if float(record['score']) >= settings.SCORE_THRESHOLD)),
+        settings.SCORE_THRESHOLD))
     html.append('</div>')
     html.append(html_sortheader)
     html.append('</div>')
@@ -101,7 +101,7 @@ def generate_html_summary(ds, layer, maxfeature=None, features=None, thresholds=
                       col*(imsize+gap):col*(imsize+gap)+imsize,:] = vis
             imsave(ed.filename('html/' + imfn), tiled)
         # Generate the wrapper HTML
-        graytext = ' lowscore' if float(record['score']) < settings.QUANTILE else ''
+        graytext = ' lowscore' if float(record['score']) < settings.SCORE_THRESHOLD else ''
         html.append('><div class="unit%s" data-order="%d %d %d">' %
                 (graytext, label_order, record['score-order'], unit + 1))
         html.append('<div class="unitlabel">%s</div>' % fix(record['label']))
