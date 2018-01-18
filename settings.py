@@ -1,7 +1,6 @@
 # global settings
-GPU = True
-TEST_MODE = False
-MODEL = 'resnet18'
+GPU = True   # running on GPU is highly suggested
+TEST_MODE = False  # turning on the testmode means the code will run on a small dataset.
 DATASET = 'places365'
 QUANTILE = 0.04
 TOPN = 10
@@ -13,14 +12,14 @@ if MODEL == 'resnet18':
     FEATURE_NAMES = ['layer4']
     if DATASET == 'places365':
         NUM_CLASSES = 365
-        DATA_DIRECTORY = '../NetDissect/dataset/broden1_224'
+        DATA_DIRECTORY = 'dataset/broden1_224'
         IMG_SIZE = 224
         MODEL_FILE = 'zoo/resnet18_places365.pth.tar'
         MODEL_PARALLEL = True
         OUTPUT_FOLDER = "result/pytorch_resnet18_places365"
     elif DATASET == 'imagenet':
         NUM_CLASSES = 1000
-        DATA_DIRECTORY = '../NetDissect/dataset/broden1_224'
+        DATA_DIRECTORY = 'dataset/broden1_224'
         IMG_SIZE = 22
         MODEL_FILE = None
         MODEL_PARALLEL = False
@@ -31,7 +30,8 @@ if TEST_MODE:
     BATCH_SIZE = 4
     TALLY_BATCH_SIZE = 2
     TALLY_AHEAD = 1
-    INDEX_FILE = 'index_sm.csv'
+    INDEX_FILE = 'index_sm.csv'   #actually you should provide this file in dataset firstly
+    MODEL = 'resnet18'
     OUTPUT_FOLDER += "_test"
 else:
     WORKERS = 8
