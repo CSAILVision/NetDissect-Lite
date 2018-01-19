@@ -12,5 +12,4 @@ wget --progress=bar \
    http://places2.csail.mit.edu/models_places365/resnet18_places365.pth.tar
 popd
 
-
-done
+echo "done"
