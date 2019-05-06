@@ -65,7 +65,7 @@ class FeatureOperator:
                 input = input.cuda()
             input_var = V(input,volatile=True)
             logit = model.forward(input_var)
-            while np.isnan(logit.data.max()):
+            while np.isnan(logit.data.cpu().max()):
                 print("nan") #which I have no idea why it will happen
                 del features_blobs[:]
                 logit = model.forward(input_var)
@@ -263,4 +263,3 @@ class FeatureOperator:
                 for i in range(len(ordering)):
                     writer.writerow(rets[i])
         return rets
-
